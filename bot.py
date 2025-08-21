@@ -1,55 +1,47 @@
 import os
-import json
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from pymongo import MongoClient
 
-# ✅ Admin ID (apna Telegram ID yahan daalo)
+# ✅ Env Vars
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-
-# ✅ Bot Token Render ke env vars se aayega
 TOKEN = os.getenv("BOT_TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
 
-# ✅ Files
-DATA_FILE = "data.json"
-USERS_FILE = "users.json"
+# ✅ MongoDB Setup
+client = MongoClient(MONGO_URI)
+db = client["telegram_bot"]   # database name
+users_col = db["users"]
+data_col = db["data"]
 
 # ---------------- USERS SYSTEM ----------------
 
-def load_users():
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+def add_user(user_id: int):
+    """Add user if not exists"""
+    if not users_col.find_one({"user_id": user_id}):
+        users_col.insert_one({"user_id": user_id})
 
-def save_users(users):
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
-
-users = load_users()
+def get_all_users():
+    """Return all user IDs"""
+    return [u["user_id"] for u in users_col.find()]
 
 # ---------------- DATA SYSTEM ----------------
 
-def load_data():
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+def add_code(code: str, message: str):
+    data_col.update_one({"code": code}, {"$set": {"message": message}}, upsert=True)
 
-def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def get_code_message(code: str):
+    entry = data_col.find_one({"code": code})
+    return entry["message"] if entry else None
 
-data = load_data()
+def delete_code(code: str):
+    data_col.delete_one({"code": code})
 
 # ---------------- COMMANDS ----------------
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    if user_id not in users:
-        users.append(user_id)
-        save_users(users)
+    add_user(user_id)
 
     await update.message.reply_text(
         f"Hello! Send a code like 001, 002 etc.\n"
@@ -68,9 +60,8 @@ async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     code = context.args[0]
     message = " ".join(context.args[1:])
-    data[code] = message
-    save_data(data)
-    await update.message.reply_text(f"✅ Added message for code {code}")
+    add_code(code, message)
+    await update.message.reply_text(f"✅ Added/Updated message for code {code}")
 
 async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -78,17 +69,13 @@ async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 You are not allowed.")
         return
 
-    if len(context.args) < 1:
+    if not context.args:
         await update.message.reply_text("Usage: /delete <code>")
         return
 
     code = context.args[0]
-    if code in data:
-        del data[code]
-        save_data(data)
-        await update.message.reply_text(f"🗑️ Deleted message for code {code}")
-    else:
-        await update.message.reply_text(f"⚠️ No message found for code {code}")
+    delete_code(code)
+    await update.message.reply_text(f"🗑️ Deleted message for code {code}")
 
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
@@ -103,21 +90,22 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = " ".join(context.args)
     count = 0
 
-    for uid in users:
+    for uid in get_all_users():
         try:
             await context.bot.send_message(chat_id=uid, text=message)
             count += 1
         except:
-            pass  # skip agar user ne block kar diya hai
+            pass  # skip agar user ne block kar diya ho
 
     await update.message.reply_text(f"📢 Broadcast sent to {count} users.")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = update.message.text.strip()
-    if code in data:
-        await update.message.reply_text(data[code])
+    message = get_code_message(code)
+    if message:
+        await update.message.reply_text(message)
     else:
-        await update.message.reply_text("⚠️ Invalid code. Try again!")
+        await update.message.reply_text("❌️ Invalid code. Try again!")
 
 # ---------------- MAIN ----------------
 
