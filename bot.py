@@ -1,3 +1,4 @@
+import os
 import json
 from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
 from telegram.ext import (
@@ -12,7 +13,7 @@ from telegram.ext import (
 # File to store responses
 RESPONSES_FILE = "responses.json"
 
-# Admin Telegram ID (replace with your ID after /start)
+# Admin Telegram ID (replace with your ID after running /start once)
 ADMIN_ID = 123456789
 
 # Load responses from file
@@ -111,7 +112,10 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results, cache_time=0)
 
 def main():
-    TOKEN = "8306180570:AAEl2xMK_js0CliGrXAX2JrzVGsm3XA1fIQ"  # Replace with your regenerated bot token
+    TOKEN = os.getenv("BOT_TOKEN")  # Token from Render Environment Variables
+    if not TOKEN:
+        print("❌ BOT_TOKEN not found! Set it in environment variables.")
+        return
 
     app = Application.builder().token(TOKEN).build()
 
@@ -122,6 +126,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(InlineQueryHandler(inline_query))
 
+    print("🤖 Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
