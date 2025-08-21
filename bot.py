@@ -1,50 +1,65 @@
 import os
 import json
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    InlineQueryHandler,
-    filters,
-    ContextTypes
-)
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-# File to store responses
-RESPONSES_FILE = "responses.json"
+# ✅ Admin ID (apna Telegram ID yahan daalo)
+ADMIN_ID = 123456789  
 
-# Admin Telegram ID (replace with your ID after running /start once)
-ADMIN_ID = 7273895542
+# ✅ Bot Token Render ke env vars se aayega
+TOKEN = os.getenv("BOT_TOKEN")
 
-# Load responses from file
-def load_responses():
+# ✅ Files
+DATA_FILE = "data.json"
+USERS_FILE = "users.json"
+
+# ---------------- USERS SYSTEM ----------------
+
+def load_users():
     try:
-        with open(RESPONSES_FILE, "r", encoding="utf-8") as f:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def save_users(users):
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+users = load_users()
+
+# ---------------- DATA SYSTEM ----------------
+
+def load_data():
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-# Save responses to file
-def save_responses(responses):
-    with open(RESPONSES_FILE, "w", encoding="utf-8") as f:
-        json.dump(responses, f, ensure_ascii=False, indent=2)
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-# Global dictionary
-responses = load_responses()
+data = load_data()
 
-# Start command
+# ---------------- COMMANDS ----------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
+    if user_id not in users:
+        users.append(user_id)
+        save_users(users)
+
     await update.message.reply_text(
         f"Hello! Send a code like 001, 002 etc.\n"
         f"Your Telegram ID is: {user_id}"
     )
 
-# Add new code-response (Admin only)
-async def add_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
-        await update.message.reply_text("🚫 You are not allowed to use this command.")
+        await update.message.reply_text("🚫 You are not allowed.")
         return
 
     if len(context.args) < 2:
@@ -53,17 +68,14 @@ async def add_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     code = context.args[0]
     message = " ".join(context.args[1:])
+    data[code] = message
+    save_data(data)
+    await update.message.reply_text(f"✅ Added message for code {code}")
 
-    responses[code] = message
-    save_responses(responses)
-
-    await update.message.reply_text(f"✅ Added response for code {code}")
-
-# Delete a code-response (Admin only)
-async def delete_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     if user_id != ADMIN_ID:
-        await update.message.reply_text("🚫 You are not allowed to use this command.")
+        await update.message.reply_text("🚫 You are not allowed.")
         return
 
     if len(context.args) < 1:
@@ -71,60 +83,52 @@ async def delete_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     code = context.args[0]
-    if code in responses:
-        del responses[code]
-        save_responses(responses)
-        await update.message.reply_text(f"🗑️ Deleted response for code {code}")
+    if code in data:
+        del data[code]
+        save_data(data)
+        await update.message.reply_text(f"🗑️ Deleted message for code {code}")
     else:
-        await update.message.reply_text("❌ Code not found.")
+        await update.message.reply_text(f"⚠️ No message found for code {code}")
 
-# List all codes
-async def list_codes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if responses:
-        codes_list = "\n".join([f"- {c}" for c in responses.keys()])
-        await update.message.reply_text(f"📋 Available codes:\n{codes_list}")
-    else:
-        await update.message.reply_text("📭 No codes available yet.")
-
-# Handle normal messages
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip()
-    if user_text in responses:
-        await update.message.reply_text(responses[user_text])
-    else:
-        await update.message.reply_text("❌ Code not recognized.")
-
-# Inline query (search by code)
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.inline_query.query.strip()
-
-    results = []
-    if query in responses:
-        results.append(
-            InlineQueryResultArticle(
-                id=query,
-                title=f"Code {query}",
-                description=responses[query][:50] + ("..." if len(responses[query]) > 50 else ""),
-                input_message_content=InputTextMessageContent(responses[query])
-            )
-        )
-
-    await update.inline_query.answer(results, cache_time=0)
-
-def main():
-    TOKEN = os.getenv("BOT_TOKEN")  # Token from Render Environment Variables
-    if not TOKEN:
-        print("❌ BOT_TOKEN not found! Set it in environment variables.")
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("🚫 You are not allowed.")
         return
 
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+
+    message = " ".join(context.args)
+    count = 0
+
+    for uid in users:
+        try:
+            await context.bot.send_message(chat_id=uid, text=message)
+            count += 1
+        except:
+            pass  # skip agar user ne block kar diya hai
+
+    await update.message.reply_text(f"📢 Broadcast sent to {count} users.")
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    code = update.message.text.strip()
+    if code in data:
+        await update.message.reply_text(data[code])
+    else:
+        await update.message.reply_text("⚠️ Invalid code. Try again!")
+
+# ---------------- MAIN ----------------
+
+def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add_response))
-    app.add_handler(CommandHandler("delete", delete_response))
-    app.add_handler(CommandHandler("list", list_codes))
+    app.add_handler(CommandHandler("add", add))
+    app.add_handler(CommandHandler("delete", delete))
+    app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(InlineQueryHandler(inline_query))
 
     print("🤖 Bot is running...")
     app.run_polling()
