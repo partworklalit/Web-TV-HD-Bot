@@ -14,7 +14,7 @@ from telegram.ext import (
 RESPONSES_FILE = "responses.json"
 
 # Admin Telegram ID (replace with your ID after running /start once)
-ADMIN_ID = 123456789
+ADMIN_ID = 7273895542
 
 # Load responses from file
 def load_responses():
