@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # ✅ Admin ID (apna Telegram ID yahan daalo)
-ADMIN_ID = 7273895542
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 # ✅ Bot Token Render ke env vars se aayega
 TOKEN = os.getenv("BOT_TOKEN")
